@@ -1,0 +1,707 @@
+---
+title: "Exoplanet Data Analysis"
+author: "Yash Pimpale"
+date: "10 August, 2023"
+runtime: shiny
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, error = FALSE)
+```
+
+**Note: To run the Rshiny App, run this file on your local machine.**
+
+Exoplanets are planets that orbit stars beyond our solar system which have opened new possibilities for the search for extraterrestrial life. They are made up of elements that are similar to planets in our solar system. The first exoplanets were discovered in the 1990s and since then astronomers have identified thousands of exoplanets.  
+
+We will now import exoplanets dataset which contains their parameters such as mass, radius, method of discovery, year of discovery, distance from the sun, etc. Below is the preview of the dataset:-
+
+```{r Load Data}
+
+  #Load required libraries
+  library(tidyverse)
+  library(dplyr)
+  library(ggplot2)
+  library(viridis)
+  library(ggiraph)
+  library(e1071)
+  library(ggforce)
+  library(shiny)
+  library(shinyWidgets)
+  library(mvtnorm)
+
+  #Load data into a tibble.
+  exo_data = read_csv("exo_data.csv",
+                      col_types = cols(
+                        flag = col_factor(),
+                        meth = col_factor(),
+                        year = col_integer(),
+                        age = col_double()
+                        ))
+  
+  #Display the dataset.
+  print(exo_data[1:5,1:20])
+  
+  #Count number of records in dataset
+  count_bmd = nrow(exo_data)
+
+```
+
+Now we will remove those records for whom the method of discovery is missing.  
+
+Total number of records before removing the records is `r count_bmd`.
+
+```{r exclude missing data}
+
+  #Remove rows with unknown method of discovery
+  exo_data = exo_data %>% 
+    #Keep rows for whom method is not missing
+    filter(!is.na(meth))
+  
+  #Count number of records in dataset post deletion of records
+  count_amd = nrow(exo_data)
+
+```
+
+Total number of records after excluding the exoplanets with an unknown method of discovery is `r count_amd`.
+
+## -------------------------------------------------------------------------------------------
+
+We will now plot boxplot of log-distance from the Sun and the method of discovery of exoplanets, which will help us understanding which method is effective in finding exoplanets that are farthest/closest from the sun.
+
+```{r boxplot, fig.height = 7, fig.width = 10, fig.align='center'}
+
+  #Keep only those records for whom distance is present. i.e. remove NA values of distance.
+  exo_data_1 = exo_data %>% 
+    #Keep rows for whom distance is not missing
+    filter(!is.na(dist))
+  
+  #Create a box plot of meth vs log of distance from the sun
+  ggplot(exo_data_1, aes(x = meth, y = log(dist))) +
+    #Create boxplot with IQR of methods filled with different colours
+    geom_boxplot(aes(fill = meth), show.legend = FALSE) +
+    #Set colour palette to fill boxes
+    scale_fill_viridis_d(option="viridis") +
+    #Add theme with only x and y lines and no gridlines
+    theme_classic() +
+    #Add title and labels with specified formatting
+    ggtitle("Relationship between Log-Distance from the Sun and Methods of Discovery") +
+    theme(plot.title = element_text(hjust = 0.5, colour = "#490d57")) +
+    theme(text = element_text(size = 15, colour = "#87317d")) +
+    xlab("Method of Discovery") +
+    ylab("Log-Distance from the Sun (parsec)") + 
+    #Change limit of y-axis
+    ylim(0.0, 10.0)
+
+```
+
+**Interpretation:-**  
+
+• The Inter Quantile Range (IQR) for timing, microlensing and transit method of discovery is small which indicates that the values are very compact. Whereas IQR is large for RV and imaging method indicating that their values are spread out.  
+
+• From the plot, since the median line for timing method lies above the center of IQR, we can say that the data is left-skewed in distribution, whereas for imaging method, median line lies below the center of IQR, hence it's data is right-skewed in distribution. For all other methods, the median line lies around the center indicating that the data is symmetrically distributed.  
+
+• Also by just looking at the plot, we can identify that there are many outliers for transit, RV and timing method. This indicates that there are many exoplanets that have log-distance from sun higher/lower than the 75% / 25% of the observations for respective method of discovery.  
+
+• We can say that microlensing method is effective in finding exoplanets that are farthest from the sun since it has the highest median value. While RV and imaging method are useful in finding exoplanets that have comparatively shorter distance from the sun. Exoplanets that are moderately far (middle of farthest and closest) from the sun are mostly found using transit and timing methods.  
+
+## -------------------------------------------------------------------------------------------
+
+We will create an interactive scatterplot of log-mass vs log-distance from the sun with points coloured by their method of discovery. We can hover over the points to look for their names and on click, we will redirect user to their catalogue page.
+
+```{r scatterplot mass vs distance, fig.height = 6, fig.width = 6, fig.align='center'}
+
+    #Keep only those records for whom mass is present. i.e. remove NA values of mass.
+    exo_data_2 = exo_data_1 %>% 
+      #Keep rows for whom mass is not missing
+      filter(!is.na(mass))
+    
+    #Create 'onclick' column - window. Concate link with id at the end.
+    exo_data_2$onclick = sprintf("window.open(\"%s%s\")",
+                                  "http://www.openexoplanetcatalogue.com/planet/",
+                                  as.character(exo_data_2$id))
+    
+    #Create a scatter plot of log of mass vs distance from the sun
+    scatter = ggplot(exo_data_2, aes(x = log(mass), y = log(dist))) +
+                #Add theme with only x and y lines and no gridlines
+                theme_classic() +
+                #Add title and labels with specified formatting. Change legend position.
+                ggtitle("Mass vs Distance from the Sun") +
+                theme(legend.position = "bottom",
+                      plot.title = element_text(hjust = 0.5, colour = "#1e6e66"),
+                      text = element_text(size = 15, color = "#1e524c")) +
+                xlab("Log-Mass (jupiter masses)") +
+                ylab("Log-Distance from the Sun (parsec)") + 
+                #Change limit of y-axis 
+                ylim(0.0, 10.0) +
+                #Change legend title  
+                labs(colour = "Method of Discovery")  +          
+                #Set colour palette for points
+                scale_color_manual(values = c("#e08c1d", "#34b3ae", "#7ad450", "#1b58c2", "#cc217f"))
+    
+    #Use geom_point_interactive to add tool tip and on click popup window
+    scatter_1 = scatter + geom_point_interactive(aes(tooltip = exo_data_2$id,
+                               data_id = exo_data_2$id,
+                               onclick = exo_data_2$onclick,
+                               color = exo_data_2$meth))
+    
+    #Interactive plot displaying Name on hover
+    girafe(code = print(scatter_1), width = 7)
+
+```
+
+**Interpretations:-**  
+
+• From the graph it is visible that microlensing method is effective in finding exoplanets that are farthest from the sun and have moderate-to-high mass. While imaging method is effective in finding exoplanets that are closest from the sun and have high mass.  
+
+• Exoplanets that have moderate-to-high distance from the sun and low-to-moderate mass were mostly discovered using transit method. On the other hand, exoplanets that also have low-to-moderate mass but low-to-moderate distance from the sun, were discovered using RV method.  
+
+## -------------------------------------------------------------------------------------------
+
+We will now rename radius column as 'jupiter_radius' and also create a new column called 'earth_radius' which will contain values that are 11.2 times the 'jupiter_radius' meaning that if an exoplanet is 'x' jupiter radius wide, then it will be x*11.2 earth radius wide.  
+
+```{r add columns}
+
+    #Create new dataframe with modified dataset as mentioned below
+    exo_data_3 = exo_data %>%
+      #Rename 'radius' column to 'jupiter_radius'
+      rename(jupiter_radius = radius) %>%
+      #Create new column 'earth_radius' which is 11.2 times the 'jupiter_radius'
+      mutate(earth_radius = 11.2 * jupiter_radius)
+    
+    #Display the data
+    print(head(exo_data_3[1:5,c("id", "jupiter_radius", "earth_radius")]))
+
+```
+
+## -------------------------------------------------------------------------------------------
+
+Now, to perform k-means clustering, we will first compute log of earth_radius and period and store values in 2 new columns. We will also remove records if they have missing earth radius or period. Cluster size is selected as 4 which indicates exoplanets are any of the following type 'rocky', 'hot jupiters', 'cold gas giants' or 'others'.  
+
+```{r kmeans, fig.height = 7, fig.width = 10, fig.align='center'}
+
+    #Modify dataset as mentioned below
+    exo_data_4 = exo_data_3 %>% 
+      #Keep only those records for whom earth_radius and period is present.  
+      filter(!is.na(earth_radius), !is.na(period)) %>%
+      #Create 2 columns consisting of log of earth radius and period.
+      mutate(log_earth_radius = log(earth_radius),
+             log_period = log(period))
+    
+    #Set seed to 1
+    set.seed(1)
+    
+    #Perform kmeans with 4 clusters for log_earth_radius and log_period columns
+    k = 4
+    kmeans_cl = kmeans(exo_data_4[,c("log_earth_radius", "log_period")], center = k)
+    
+    #Display cluster assignment summary
+    print(str(kmeans_cl))
+
+```
+
+The first cluster is composed of `r kmeans_cl$size[1]` observations, while the smallest cluster, number 2 has `r kmeans_cl$size[2]` observations. Cluster 3 and 4 have `r kmeans_cl$size[3]` and `r kmeans_cl$size[4]` observations respectively. The total within-cluster sum of squares is `r round(kmeans_cl$tot.withinss,2)`.
+
+## -------------------------------------------------------------------------------------------
+
+To visualize cluster assignment, we will now display scatterplot of log of earth radius vs orbital period with datapoints filled with exoplanet type.
+
+```{r kmeans plot, fig.height = 7, fig.width = 10, fig.align='center'}
+
+    #Add new column 'type' with cluster labels as factors to the dataset. Changed levels order so that graph looks similar to        #provided plot i.e. cold gas gaints on right upperside.
+    exo_data_4 = exo_data_4 %>%
+      mutate(type = factor(kmeans_cl$cluster, levels = 1:4, labels = c( "others", "hot jupiters", "rocky", "cold gas giants")))   
+    
+    # Create the scatterplot of log_period and log_earth_radius with colored points based on the cluster labels
+    scatterplot_plot = ggplot(exo_data_4, aes(x = log_period, y = log_earth_radius)) +
+                        #Add points coloured by type of planet and set size of points to 2
+                        geom_point(aes(color = type), size = 2) +
+                        #Add boundary for clusters with different colours for type.
+                        geom_mark_ellipse(aes(fill = type), expand = unit(0.5, "mm")) +
+                        #Change limit of y-axis 
+                        ylim(-1.0, 3.5) +
+                        #Add cluster names in the middle of each clusters
+                        annotate("text", x=1, y=0.6, label= "Rocky", size = 10, color = "white") +
+                        annotate("text", x=1, y=0.2, label= "Planets", size = 10, color = "white") + 
+                        annotate("text", x=2.9, y=1.4, label= "Others", size = 8, color = "white") +
+                        annotate("text", x=1.1, y=2.8, label= "Hot", size = 7, color = "white") +
+                        annotate("text", x=1.1, y=2.5, label= "Jupiters", size = 7, color = "white") + 
+                        annotate("text", x=7, y=2.6, label= "Cold", size = 9, color = "white") + 
+                        annotate("text", x=7, y=2.2, label= "Gas", size = 9, color = "white") + 
+                        annotate("text", x=7.1, y=1.8, label= "Giants", size = 9, color = "white") +
+                        #Customize theme.
+                        theme(
+                          #Remove legend
+                          legend.position = "none",
+                          #Set colour of title to orange and labels to white
+                          plot.title = element_text(size = 24, hjust = 0.5, colour = "orange"),
+                          text=element_text(size=14, color = "white"),
+                          axis.text = element_text(size = 12, colour="white"),
+                          #Remove panel grids
+                          panel.grid.major = element_blank(),
+                          panel.grid.minor = element_blank(),
+                          #Change plot and panel background colour
+                          plot.background=element_rect(fill = "black"),
+                          panel.background = element_rect(fill = 'black', colour = "white")
+                        ) +
+                        #Add title and labels
+                        ggtitle("Exoplanets Populations") +
+                        xlab("Log of Orbial Period (Days)") +
+                        ylab("Log of Earth Radius") 
+      
+    #Display scatterplot
+    print(scatterplot_plot)
+
+```
+
+From the graph, we can observe that rocky planets have size similar to earth and have short orbital periods. Hot Jupiters exoplanets are large planets since they have large earth radius and small orbital periods. Cold gas giants usually have larger earth radius as well as longer orbital periods. Rest all are classified as others.
+
+## -------------------------------------------------------------------------------------------
+
+To understand mass distribution across different exoplanet types, we will create violin plot of log-mass and exoplanet type.  
+
+Note: Since we are using the reduced dataset used for k-means, there will be only 4 exoplanet types i.e. NA values will not be present in the plot.
+
+```{r violin plot, fig.height = 7, fig.width = 10, fig.align='center'}
+
+    #Filter data
+    exo_data_6 = exo_data_4 %>% 
+      #Keep only those records for whom mass is present.  
+      filter(!is.na(mass))
+
+    #Create the violin plot of type vs log-mass, with different colours filled for each type of planet.
+    violin_plot = ggplot(exo_data_6, aes(x = type, y = log(mass), fill = type)) +
+                    #Add violin plots
+                    geom_violin(trim = FALSE) +
+                    #Add box plot inside the violin
+                    geom_boxplot(width = 0.07) +
+                    #Add colour pallette for box colour
+                    scale_fill_manual(values = c("#3c4d6e", "#7f7c75", "#bbaf71", "#f0f921")) +
+                    #Add theme with only x and y lines and no gridlines
+                    theme_classic() +
+                    #Add title and labels with specified formatting
+                    ggtitle("Mass Distribution of various Types of Exoplanet") +
+                    theme(plot.title = element_text(hjust = 0.5, colour = "#002051"),
+                          text = element_text(size = 14, colour = "#002051"),
+                          legend.position = "none") +
+                    xlab("Exoplanet Types") +
+                    ylab("Log-Mass (jupiter masses)")
+    
+    #Print violin plot
+    print(violin_plot)
+    
+``` 
+
+**Interpretation:-**  
+
+• In violin plot, wider sections indicates higher density meaning majority of datapoints have the corresponding log-mass value. While narrow sections indicates lower density meaning few datapoints have the corresponding log-mass value.  
+
+• The length of violin indicates the inter quantile range of each type. Other types of exoplanets have the largest IQR meaning they have wider range of mass values. While hot jupiters and cold gas gaints exoplanets type have relatively smaller IQR indicating the mass values are compact.  
+
+• Since the bulge for cold gas gaint exoplanets type is more on the upper side, we can say that the data is left-skewed in distribution. Whereas wider section for hot jupiter exoplanets is on slightly lower side, hence their mass is right-skewed in distribution. Rocky and other planets have symmetric mass distrbution.  
+
+• The median for hot jupiter exoplanet is highest, hence we can say that they have these exoplanets have largest log-mass values, followed by others, rocky and cold gas giants respectively. Cold gas giants have the lowest log-mass which is self-explanatory by its name.  
+
+## -------------------------------------------------------------------------------------------
+
+To create a celestial map for the exoplanets in polar coordinates, we need to first transform right ascension and declination columns to seconds.
+
+To convert right ascension (r_asc) from 'hh mm ss' to seconds, we will first separate each values using space as separator and then multiple hours by 3600 and minutes by 60. Finally we will add convert hours, minutes with seconds to get total seconds.  
+
+Similar we will convert declination from '+/-dd mm ss' to seconds, but instead of hours, 'degree' will be present and then multiple degrees by 3600 and minutes by 60. Finally we will add convert degree, minutes with seconds to get total seconds.  
+
+```{r celestial map, fig.height = 7.5, fig.width = 7.5, fig.align='center'}
+    
+    #Function to convert hh mm ss to seconds
+    hours_to_seconds = function(time) {
+      #Separate hours, minutes and sec using space as separator.
+      sep = strsplit(time, " ")[[1]]
+      #Store each values individually
+      hrs = as.numeric(sep[1])
+      min = as.numeric(sep[2])
+      sec = as.numeric(sep[3])
+      #Calculate total seconds using below formula
+      total_sec = (hrs * 3600) + (min * 60) + sec
+      
+      return(total_sec)
+    }
+    
+    #Function to convert +/-dd mm ss to seconds
+    degree_to_seconds = function(degree) {
+      #Separate degree, minutes and sec using space as separator.
+      sep = strsplit(degree, " ")[[1]]
+      #Extract sign +- from degree part
+      sign = substr(sep[1], 1, 1)
+      #Check if sign is positive or negative. This will help in determining final sign of seconds.
+      if(sign == "+"){
+        #If positive, then set sign value to 1
+        sign_val = 1
+      }
+      #If negative, then set sign value to -1
+      else{
+        sign_val = -1
+      }
+      
+      #Store each values individually
+      deg = as.numeric(sep[1])
+      min = as.numeric(sep[2])
+      sec = as.numeric(sep[3])
+      #Calculate total seconds using below formula
+      total_sec = sign_val * ((deg * 3600) + (min * 60) + sec)
+      
+      return(total_sec)
+    }
+
+    #Convert r_asc and decl to seconds
+    exo_data_2 = exo_data_2 %>%
+      #Apply respective function for both the columns
+      mutate(r_asc = sapply(r_asc, hours_to_seconds), decl = sapply(decl, degree_to_seconds))
+    
+    #Add breaks for y axis
+    breaks = c(0, 100000, 200000, 308650)
+    #Add coordinates of y axis where breaks text will be added
+    ylimits = c(10000, 110000, 210000, 318650)
+    
+    #Create celestial map
+    celestial_map = ggplot(exo_data_2, aes(x = r_asc, y = decl)) +
+                      #Add scatter points. Set size to 2 and shape to circle.
+                      geom_point(color = "#b19fcf",size = 2, shape = 20) +
+                      #Create a polar plot using x as theta
+                      coord_polar(theta = "x") +
+                      #Set limit and add breaks for y axis
+                      scale_y_continuous(limits = c(min(exo_data_2$decl), max(exo_data_2$decl) + 10000), breaks = breaks) +
+                      #Add text for y axis on grid itself
+                      annotate("text", x = 0, y = ylimits, label = as.character(breaks), size = 4, color = "white") +
+                      #Add title and labels.
+                      ggtitle("Celestial Map of Exoplanets") +
+                      xlab("Right Ascention (seconds)") +
+                      ylab("Declination (seconds)") +
+                      #Customize theme.
+                      theme(#Change text, size and colour
+                            plot.title = element_text(size=24, hjust = 0.5, colour = "white"),
+                            text = element_text(size=15, color = "white"),
+                            axis.text = element_text(size = 12, colour="white"),
+                            #Change plot and panel background colour
+                            plot.background=element_rect(fill = "#241045", colour = "#241045"),
+                            panel.background = element_rect(fill = '#241045', colour = "#241045"),
+                            #Hide y axis breaks since we added them on grid itself
+                            axis.ticks.y = element_blank(),
+                            axis.text.y = element_blank()
+                        )
+    
+    #Display celestial map
+    print(celestial_map)
+
+```
+
+## -------------------------------------------------------------------------------------------
+
+For our rshiny app, we will create two tabs. One will include summary of exoplanet and instruction on how to use the app. Second tab will consist of an interactive plot in which user can select year of discovery and type of exoplanet he wish to display on the scatterplot.
+
+```{r rshiny, fig.height = 7, fig.width = 10, fig.align='center'}
+
+    #First we need to copy type column from reduced dataset to actual dataset for matching records.
+    #Steps:-
+    #    1. Remove records with NA values for distance and mass column from reduced dataset. So we will have records for whom        #       kmeans is done and type is present.
+    #    2. Remove records with NA values for earth radius and period column from actual dataset i.e. these records will be same     #       as records filtered in step 1 but kmeans is not performed on these and type is missing. We need to remove these          #       records from actual dataset so that records from step 1 (for whom type is present) can be added.
+    #    3. By adding these records, we will get the final dataset with type column present in actual dataset.
+
+    #Remove records with NA values for distance and mass column from reduced dataset
+    NA_dist_mass = exo_data_4 %>% 
+      filter(!is.na(dist), !is.na(mass))
+
+    #Convert right ascension and declination to seconds for Que 9
+    NA_dist_mass = NA_dist_mass %>%
+      mutate(r_asc = sapply(r_asc, hours_to_seconds), decl = sapply(decl, degree_to_seconds))
+  
+    #Modify actual dataset as mentioned in que 5.
+    exo_data_2 = exo_data_2 %>%
+      #Rename 'radius' column to 'jupiter_radius'
+      rename(jupiter_radius = radius) %>%
+      #Create new column 'earth_radius' which is 11.2 times the 'jupiter_radius'
+      mutate(earth_radius = 11.2 * jupiter_radius)
+
+    #Remove records with NA values for earth radius and period column from actual dataset
+    NA_earth_period = exo_data_2 %>% 
+      filter(!is.na(earth_radius), !is.na(period))
+  
+    #Keep only those records which are not present in filtered actual data above.
+    filtered_data = exo_data_2 %>%
+      filter(!id %in% NA_earth_period$id)
+
+    #Combine both datasets
+    combined_data = bind_rows(NA_dist_mass, filtered_data)
+
+    #Create UI of Rshiny App
+    UI = shinyUI(fluidPage(
+                    #Create 2 tabs, summary and interactive app.
+                    tabsetPanel(
+                      tabPanel("Summary",
+                       
+                       #Set Title
+                       titlePanel("Exploring Exoplanets"),
+                      
+                       p("Welcome to Exoplanet Explorer app! We will explore the world of exoplanets which have opened new possibilities for the 
+                         search for extraterrestrial life."),
+                       br(),
+                       
+                       #Set Sub Title
+                       titlePanel("What Are Exoplanets?"),
+                       
+                       p("Exoplanets are planets that orbit stars beyond our solar system. They are made up of elements that are similar 
+                       to planets in our solar system, but their composition can be different. By measuring their sizes and weights, we can see 
+                       various diversity ranging from very rocky (like Earth and Venus) to very gas-rich (like Jupiter and Saturn)."),
+                       p("The first exoplanets were discovered in the 1990s and since then astronomers have identified thousands of exoplanets 
+                       using variety of detection methods such as transit method, radial velocity method and direct imaging."),
+                       
+                       #Set Sub Title
+                       titlePanel("The Importance of Scatter Plots"),
+                       
+                       p("Scatter plot displayed in this app, plays a crucial role in visualizing and understanding the characteristics, 
+                       distribution and relationships of these exoplanets. By plotting the logarithm of exoplanet mass against 
+                       the logarithm of distance from Sun, provides insights into the sizes and masses of these planets, which are 
+                       key factors in understanding their composition, structure and potential habitability. Also by coloring points 
+                       on scatter plot based on different types of methods of discovery, researchers can assess the impact of 
+                       observational biases on the distribution of planets."),
+                       
+                       #Set Sub Title
+                       titlePanel("Instructions"),
+                       
+                       p("To use this app, simply adjust the slider to select a specific year and choose an exoplanet type from the 
+                         dropdown menu. The scatter plot will dynamically update to display the selected data points based on your 
+                         choices. Each data point represents an exoplanet, coloured by its discovery method."),
+                       
+                       #Expand window for aesthetic look.
+                       br(),
+                       br(),
+                       br(),
+                       br(),
+                       br(),
+                       br(),
+                       br(),
+                       br(),
+                       br(),
+                       br(),
+                       br()
+                       
+                      ),
+                      
+                      tabPanel("Interactive App",
+      
+                        tags$head(  
+                          #Change background colour.
+                          tags$style('.container-fluid {background-color: #4f2842;}'),
+                          tags$style(
+                              #Change sidebar background colour and colour of text outside sidebar to white.
+                              HTML(" #sidebar {background-color: #4f2842;}
+                                     body {color: white;}
+                                  ")
+                          )
+                        ),
+      
+                      #Set Title
+                      titlePanel("Plotting"),
+      
+                      br(),
+                      p("Use the slider to select the year and choose an exoplanet type from the dropdown."),
+                      br(),
+                      br(),
+      
+                      #Create input layout
+                      fluidRow(
+                        #Sidebar with slider and select input in a single row.
+                        column(width =  5,
+          
+                               #Input to select year
+                                sliderInput("year",
+                                      label = "Select Year:",
+                                      min = 2009, 
+                                      max = 2017, 
+                                      value = 2009, 
+                                      step = 1, 
+                                      sep = "")
+                        ), 
+          
+                        #Input to select exoplanet type
+                        column(width = 5,
+                               selectInput("planet_type", 
+                                      label = "Select Exoplanet Type:",
+                                      choices = c("All", "others", "rocky", "cold gas giants", "hot jupiters"), 
+                                      selected = 'All')
+                        )
+                      ),    
+        
+                        #Create main frame
+                        mainPanel(
+                            #Display scatter plot
+                            plotOutput(outputId = "ScatterPlot", height = "500px", width = "750px"),
+                            p("Note: Log values of distance of exoplanets from sun and planet mass are used in plot.")
+                        ),
+                    
+                    br(),
+                    br(),
+                    br()
+              ))
+        ))
+    
+      #Server for the App
+      server = 
+          #Define server logic.
+          shinyServer(function(input, output) {
+          
+            #Convert tibble to dataframe
+            shiny_df = as.data.frame(combined_data)
+        
+            #Filter data based on input
+            Data = reactive({
+              #Check if type is other than 'All'
+              if(input$planet_type != 'All'){
+                #If yes, then filter data based on year and type selected by user.
+                shiny_df[(shiny_df$year == input$year) & (shiny_df$type == input$planet_type),]
+              }
+              #If no, then filter data based on year only.
+              else{
+                shiny_df[shiny_df$year == input$year,]
+              }
+            })
+        
+            #Displays scatterplot of selected variables.
+            output$ScatterPlot = renderPlot({
+          
+              #Create a scatter plot of log of mass vs distance coloured by method of discovery.
+              scatter = ggplot(Data(), aes(x = log(mass), y = log(dist), color = meth)) +
+                        #Add scatter points and set size to 3
+                        geom_point(size = 3) +
+                        #Add title and labels.
+                        ggtitle("Exoplanet Scatterplot") +
+                        xlab("Planet Mass (Jupiter Masses)") +
+                        ylab("Distance of Exoplanet from the Sun (parsec)") +
+                        #Change legend title  
+                        labs(colour = "Method of Discovery")  +
+                        #Set colour palette for points
+                        scale_color_manual(values = c("#34b3ae", "#e08c1d", "#7ad450", "#1b58c2", "#cc217f")) +
+                        #Customize theme. Position legend to bottom of scatterplot.
+                        theme(legend.position = "bottom",
+                              legend.text = element_text(size=12, hjust = 0.5, colour = "white"),
+                              legend.background = element_rect(fill = "#4f2842"),
+                              #Change text size and colour
+                              plot.title = element_text(size=24, hjust = 0.5, colour = "white"),
+                              text = element_text(size=15, color = "white"),
+                              axis.text = element_text(size = 12, colour="white"),
+                              #Remove panel grids
+                              panel.grid.major = element_blank(),
+                              panel.grid.minor = element_blank(),
+                              #Change plot and panel background colour
+                              plot.background=element_rect(fill = "#4f2842", colour = "#4f2842"),
+                              panel.background = element_rect(fill = 'black', colour = "#4f2842")
+                          )
+            
+                #Display the plot.
+                scatter
+          
+              })
+          }
+    )
+    
+    #Run the application 
+    shinyApp(ui = UI, server = server, options = list(height = 1000))
+
+```
+
+## -------------------------------------------------------------------------------------------
+
+We will now implement a function which takes arguments x_g (a vector of predictors), x (a vector of covariates), y (a vector of responses) and method (the algorithm used to optimise the parameters of the Gaussian process regression - default `BFGS'). This function will fit a Gaussian process regression with parameters optimised using the method indicated. The starting point of the optimisation will be c(0,0,0) in the log scale. This function will return the predicted values using the Gaussian process regression.
+
+The gaussian procees regression 'GPR' function will first calculate optimum values of sigma square, rho square, tau square using 'GPR_ll' function as negative log likelihood calculator for given values of x and y. Once optimum values are calculated, we will generate covariance matrices C and Sigma. Based on these values we will calculate prediction values.
+
+Using the Nelder-Mead method, we will now run the function using the log of the radius variable as the covariate and the log of the mass variable as the response. We will first remove NA values for mass and radius variable and add two new columns with values as log mass and radius since they need to be passed to the function. 
+
+```{r GPR}
+  
+    #Gaussian Process Regression function to calculate Negative Log Likelihood
+    GPR_ll = function(p, x, y) {
+      
+      #Set values of sigma square, rho square and tau square in log scale.
+      #To restrict these parameters to be positive, we will pass values in log scale and take exponential. This will ensure that       #these values are positive.
+      sig_sq = exp(p[1])
+      rho_sq = exp(p[2])
+      tau_sq = exp(p[3])
+      
+      #Initialize vector of means
+      Mu = rep(0, length(x))
+      
+      #Create the covariance matrix based on above parameters
+      Sigma = sig_sq * exp( -rho_sq * outer(x, x, '-')^2 ) + tau_sq * diag(length(x))
+      
+      #Compute log likelihood of data for given parameters
+      ll = dmvnorm(y, Mu, Sigma, log = TRUE)
+      
+      #Return negative log likelihood
+      return(-ll)
+    }
+    
+    #Function to perform Gaussian Process Regression 
+    GPR = function(x_g, x, y, method = 'BFGS'){
+      
+      #Set initial starting points for sigma square, rho square and tau square in the log scale
+      start_points = c(0,0,0)
+      
+      #Perform optimization using specified method to get optimized values of sigma square, rho square and tau square.
+      optim_result = optim(start_points, GPR_ll, x = x, y = y, method = method)
+      
+      #Store optimized values in respective variables
+      sig_sq = exp(optim_result$par[1])
+      rho_sq = exp(optim_result$par[2])
+      tau_sq = exp(optim_result$par[3])
+      
+      #Create covariance matrices
+      C = sig_sq * exp( -rho_sq * outer(x_g, x, '-')^2 )
+      Sigma = sig_sq * exp( -rho_sq * outer(x, x, '-')^2 ) + tau_sq * diag(length(x))
+      
+      #Create predictions using GPR formula
+      pred = C %*% solve(Sigma, y)
+      
+      #Return predicted values
+      return(pred)
+    }
+    
+    #Prepare data for optimization
+    exo_data_5 = exo_data %>%
+      #Remove records with NA values for mass and radius column
+      filter(!is.na(mass), !is.na(radius)) %>%
+      #Add 2 new columns which contains value as log of mass and radius respectively
+      mutate(log_radius = log(radius), log_mass = log(mass)) %>%
+      #Select only newly created columns
+      select(log_radius, log_mass)
+    
+    #Set values of x, y and x_g
+    x = exo_data_5$log_radius
+    y = exo_data_5$log_mass
+    x_g = x
+    
+    #Call GPR function to perform Gaussian Process Regression using specified method
+    GPR_pred = GPR(x_g, x, y, 'Nelder-Mead')
+  
+```
+
+We will now produce an appropriate plot of the Gaussian process regression.
+
+```{r GPR plot, fig.height = 7, fig.width = 10, fig.align='center'}
+
+    ggplot(exo_data_5, aes(x = log_radius, y = log_mass)) +
+      #Add scatter points. Set size to 2.
+      geom_point(color = "#2ac9af", size = 2) +
+      #Add prediction line to check fit on the data
+      geom_line(aes(y = GPR_pred), color = "#245e55", linewidth = 1) +
+      #Add theme with only x and y lines and no gridlines
+      theme_classic() +
+      #Add title and labels with specified formatting
+      ggtitle("Gaussian Process Regression Fit") +
+      xlab("Log-Radius (jupiter radii)") +
+      ylab("Log-Mass (jupiter masses)") +
+      theme(plot.title = element_text(hjust = 0.5, colour = "#0a6b5c"),
+            text = element_text(size = 14, colour = "#0a6b5c"))  
+
+```
+
+The above scatterplot represents log-radius on the x-axis and log-mass on the y-axis. The points displayed were passed to the gaussian process regression function to calculate predictions. The dark line over these points represents the GPR fit. This curve estimates the relationship between log-radius and log-mass based on the GPR model. Since this line captures majority of the data points i.e. it follows the curve where majority of the points are located, we can say that model fits the data well. As mass of exoplanet increases, its radius also increases.
